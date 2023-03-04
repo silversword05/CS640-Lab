@@ -51,7 +51,7 @@ def print_summary(sender_addr: str, sender_from_port: int, total_packets: int, t
     print(f"Duration of the test:    {total_duration}  ms")
 
 
-def receive_file(sock: socket):
+def receive_file(sock: socket, file_out):
     packet_count = byte_count = 0
     start = end = None
     while True:
@@ -66,6 +66,8 @@ def receive_file(sock: socket):
             end = datetime.now()
             print_summary(from_address[0], from_address[1], packet_count, byte_count, int((end - start).total_seconds() * 1000))
             break
+        else:
+            file_out.write(data)
 
 
 def send_file_request(receive_port: int, filename: str):
@@ -73,13 +75,15 @@ def send_file_request(receive_port: int, filename: str):
     sock.bind(('', receive_port))
 
     assert filename in TRACKER_TABLE, "Filename not in tracker"
-    file_table = TRACKER_TABLE[filename]
-    i = 1
-    while i in file_table:
-        packet = struct.pack("!c2I", b'R', socket.htonl(0), socket.htonl(0)) + bytes(filename, "utf-8")
-        sock.sendto(packet, (socket.gethostbyname(file_table[i][0]), file_table[i][1]))
-        receive_file(sock)
-        i += 1
+
+    with open(filename, 'wb') as f_out:
+        file_table = TRACKER_TABLE[filename]
+        i = 1
+        while i in file_table:
+            packet = struct.pack("!c2I", b'R', socket.htonl(0), socket.htonl(0)) + bytes(filename, "utf-8")
+            sock.sendto(packet, (socket.gethostbyname(file_table[i][0]), file_table[i][1]))
+            receive_file(sock, f_out)
+            i += 1
 
 
 if __name__ == "__main__":
