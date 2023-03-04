@@ -61,14 +61,13 @@ def receive_file(sock: socket, file_out):
             start = datetime.now()
         header, data = Header(*struct.unpack("!c2I", packet[:9])), packet[9:]
         print_packet(header.type, from_address[0], from_address[1], header.seq_no, data)
-        packet_count += 1
-        byte_count += len(data)
         if header.type == 'E':
             end = datetime.now()
             print_summary(from_address[0], from_address[1], packet_count, byte_count, int((end - start).total_seconds() * 1000))
             break
-        else:
-            file_out.write(data)
+        file_out.write(data)
+        packet_count += 1
+        byte_count += len(data)
 
 
 def send_file_request(receive_port: int, filename: str):
