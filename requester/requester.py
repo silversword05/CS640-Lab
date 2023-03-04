@@ -47,7 +47,7 @@ def print_summary(sender_addr: str, sender_from_port: int, total_packets: int, t
     print(f"sender addr:             {sender_addr}:{sender_from_port}")
     print(f"Total Data packets:      {total_packets}")
     print(f"Total Data bytes:        {total_bytes}")
-    print(f"Average packets/second:  {int(total_packets * 1000 / total_duration) if total_duration != 0 else 0}")
+    print(f"Average packets/second:  {round(total_packets * 1000 / total_duration) if total_duration != 0 else 0}")
     print(f"Duration of the test:    {total_duration}  ms")
     print()
 
