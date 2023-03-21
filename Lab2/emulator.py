@@ -69,7 +69,7 @@ class HopDetails:
 
     def push_queue(self, packet: bytes):
         header = Header.from_bytes(packet[:HEADER_SIZE])
-        print("Packet pushed", header, packet[HEADER_SIZE+8:])
+        print("Packet pushed", datetime.now(), header, packet[HEADER_SIZE + 8:])
         if len(self.queue_with_priority[header.priority]) >= self.queue_size:
             print("Queue full drop packet", header)
             return
@@ -80,17 +80,19 @@ class HopDetails:
             if datetime.now() <= self.delay_packet[0] + timedelta(milliseconds=self.delay):
                 return
             if random.randint(1, 100) <= self.loss_probability and Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]).packet_type != 'E':
-                print("Dropping packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
+                print("Dropping packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]),
+                      self.delay_packet[1][HEADER_SIZE + 8:])
                 self.delay_packet = None
                 return
-            # print("Sending packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
+            print("Sending packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]), self.delay_packet[1][HEADER_SIZE + 8:])
             sock.sendto(self.delay_packet[1], (str(self.next_hop_ip), self.next_hop_port))
             self.delay_packet = None
         else:
             for priority in sorted(self.queue_with_priority.keys()):
                 if len(self.queue_with_priority[priority]) > 0:
                     self.delay_packet = (datetime.now(), self.queue_with_priority[priority].popleft())
-                    # print("Delaying packet", self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
+                    print("Delaying packet", self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]),
+                          self.delay_packet[1][HEADER_SIZE + 8:])
                     break
 
 
@@ -125,12 +127,15 @@ def perform_routing(port: int):
     sock.setblocking(False)
 
     while True:
-        read_sockets, _, _ = select.select([sock], [], [], 0)
-        if sock in read_sockets:
-            packet = sock.recv(BUF_SIZE)
-            next_hop = find_next_hop(Header.from_bytes(packet[:HEADER_SIZE]))
-            if next_hop is not None:
-                next_hop.push_queue(packet)
+        while True:
+            read_sockets, _, _ = select.select([sock], [], [], 0)
+            if sock in read_sockets:
+                packet = sock.recv(BUF_SIZE)
+                next_hop = find_next_hop(Header.from_bytes(packet[:HEADER_SIZE]))
+                if next_hop is not None:
+                    next_hop.push_queue(packet)
+            else:
+                break
         for next_hop in list(ROUTING_TABLE.values()):
             next_hop.send_packets_if_ready(sock)
 

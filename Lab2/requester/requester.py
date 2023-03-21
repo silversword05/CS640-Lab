@@ -37,7 +37,7 @@ class Header:
                    data_tuple[6].decode("utf-8"), int(data_tuple[7]), int(data_tuple[8]))
 
     def __str__(self):
-        return (f"Header(priority={self.priority},src_ip={self.src_ip},src_port={self.src_port},dst_ip={self.dst_ip},dst_port={self.dst_port}"
+        return (f"Header(priority={self.priority},src_ip={self.src_ip},src_port={self.src_port},dst_ip={self.dst_ip},dst_port={self.dst_port},"
                 f"outer_length={self.outer_length},type={self.packet_type},seq_no={self.seq_no},length={self.inner_length})")
 
     def to_bytes(self):
