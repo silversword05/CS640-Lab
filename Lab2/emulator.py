@@ -101,6 +101,8 @@ def read_routing_table(table_file: str, port: int, queue_size: int):
     self_ip = socket.gethostbyname(socket.gethostname())
     with open(table_file, 'r') as f_in:
         for line in f_in.readlines():
+            if line.startswith('#'):
+                continue
             tokens = str(line).strip("\n ").split(" ")
             if tokens[0] != self_ip and tokens[0] != socket.gethostname():
                 continue

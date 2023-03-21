@@ -2,8 +2,10 @@ import argparse
 import ipaddress
 import os
 import select
+import signal
 import socket
 import struct
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -171,4 +173,5 @@ if __name__ == "__main__":
                         required=True)
 
     args = parser.parse_args()
+    signal.signal(signal.SIGINT, lambda x, y: sys.exit(1))
     receive_request(args.port, args.requester_port, args.rate, args.length, args.f_hostname, args.f_port, args.priority, args.timeout)
