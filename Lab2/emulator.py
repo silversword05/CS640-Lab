@@ -67,9 +67,13 @@ class HopDetails:
     def print_delay_packet(self):
         print(self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
 
-    def push_queue(self, packet: bytes):
+    def push_queue(self, packet: bytes, sock: socket.socket):
         header = Header.from_bytes(packet[:HEADER_SIZE])
         print("Packet pushed", datetime.now(), header, packet[HEADER_SIZE + 8:])
+        if header.packet_type == 'E':
+            print("Forwarding end packet")
+            sock.sendto(packet, (str(self.next_hop_ip), self.next_hop_port))
+            return
         if len(self.queue_with_priority[header.priority]) >= self.queue_size:
             print("Queue full drop packet", header)
             return
@@ -133,7 +137,7 @@ def perform_routing(port: int):
                 packet = sock.recv(BUF_SIZE)
                 next_hop = find_next_hop(Header.from_bytes(packet[:HEADER_SIZE]))
                 if next_hop is not None:
-                    next_hop.push_queue(packet)
+                    next_hop.push_queue(packet, sock)
             else:
                 break
         for next_hop in list(ROUTING_TABLE.values()):
