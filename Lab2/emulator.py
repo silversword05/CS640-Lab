@@ -45,17 +45,28 @@ class Header:
 
 
 class HopDetails:
-    def __init__(self, next_hop_ip: Union[int, str], next_hop_port: int, delay: int, loss_probability: int, queue_size: int):
+    def __init__(self, next_hop_ip: Union[int, str], next_hop_port: int, delay: int, loss_probability: int):
         self.next_hop_ip = ipaddress.ip_address(next_hop_ip)
         self.next_hop_port = next_hop_port
         self.delay = delay
         self.loss_probability = loss_probability
-        self.queue_with_priority = defaultdict(lambda: deque())
-        self.delay_packet: Union[Tuple[datetime, bytes], None] = None
-        self.queue_size = queue_size
 
     def __str__(self):
         return f"HopDetails(next-hop-ip={self.next_hop_ip},next-hop-port={self.next_hop_port},delay={self.delay},loss_prob={self.loss_probability})"
+
+
+def find_next_hop(header: Header) -> Union[HopDetails, None]:
+    if (header.dst_ip, header.dst_port) not in ROUTING_TABLE:
+        return None
+    return ROUTING_TABLE[(header.dst_ip, header.dst_port)]
+
+
+class QueueWithPriority:
+    def __init__(self, queue_size: int, sock: socket.socket):
+        self.queue_size = queue_size
+        self.queue_with_priority = defaultdict(lambda: deque())
+        self.delay_packet: Union[Tuple[datetime, bytes], None] = None
+        self.sock = sock
 
     def print_receive_queue(self):
         for priority in self.queue_with_priority:
@@ -64,32 +75,33 @@ class HopDetails:
                 print(Header.from_bytes(packet[:HEADER_SIZE]))
             print()
 
-    def print_delay_packet(self):
-        print(self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
-
-    def push_queue(self, packet: bytes, sock: socket.socket):
+    def push_queue(self, packet: bytes):
         header = Header.from_bytes(packet[:HEADER_SIZE])
+        next_hop = find_next_hop(header)
+        if next_hop is None:
+            return
         print("Packet pushed", datetime.now(), header, packet[HEADER_SIZE + 8:])
         if header.packet_type == 'E':
             print("Forwarding end packet")
-            sock.sendto(packet, (str(self.next_hop_ip), self.next_hop_port))
+            self.sock.sendto(packet, (str(next_hop.next_hop_ip), next_hop.next_hop_port))
             return
         if len(self.queue_with_priority[header.priority]) >= self.queue_size:
-            print("Queue full drop packet", header)
+            print("Queue", header.priority, "full drop packet", header)
             return
         self.queue_with_priority[header.priority].append(packet)
 
-    def send_packets_if_ready(self, sock: socket.socket):
+    def send_packets_if_ready(self):
         if self.delay_packet is not None:
-            if datetime.now() <= self.delay_packet[0] + timedelta(milliseconds=self.delay):
+            delay_packet_header = Header.from_bytes(self.delay_packet[1][:HEADER_SIZE])
+            next_hop = find_next_hop(delay_packet_header)
+            if datetime.now() <= self.delay_packet[0] + timedelta(milliseconds=next_hop.delay):
                 return
-            if random.randint(1, 100) <= self.loss_probability and Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]).packet_type != 'E':
-                print("Dropping packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]),
-                      self.delay_packet[1][HEADER_SIZE + 8:])
+            if random.randint(1, 100) <= next_hop.loss_probability and delay_packet_header.packet_type != 'E':
+                print("Dropping packet", datetime.now(), delay_packet_header, self.delay_packet[1][HEADER_SIZE + 8:])
                 self.delay_packet = None
                 return
-            print("Sending packet", datetime.now(), Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]), self.delay_packet[1][HEADER_SIZE + 8:])
-            sock.sendto(self.delay_packet[1], (str(self.next_hop_ip), self.next_hop_port))
+            print("Sending packet", datetime.now(), delay_packet_header, self.delay_packet[1][HEADER_SIZE + 8:])
+            self.sock.sendto(self.delay_packet[1], (str(next_hop.next_hop_ip), next_hop.next_hop_port))
             self.delay_packet = None
         else:
             for priority in sorted(self.queue_with_priority.keys()):
@@ -99,11 +111,14 @@ class HopDetails:
                           self.delay_packet[1][HEADER_SIZE + 8:])
                     break
 
+    def print_delay_packet(self):
+        print(self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
+
 
 ROUTING_TABLE: Dict[Tuple[ipaddress.IPv4Address, int], HopDetails] = dict()
 
 
-def read_routing_table(table_file: str, port: int, queue_size: int):
+def read_routing_table(table_file: str, port: int):
     self_ip = socket.gethostbyname(socket.gethostname())
     with open(table_file, 'r') as f_in:
         for line in f_in.readlines():
@@ -116,32 +131,24 @@ def read_routing_table(table_file: str, port: int, queue_size: int):
                 continue
             dst_ip = ipaddress.ip_address(socket.gethostbyname(tokens[2]))
             next_hop_ip = ipaddress.ip_address(socket.gethostbyname(tokens[4]))
-            ROUTING_TABLE[(dst_ip, int(tokens[3]))] = HopDetails(str(next_hop_ip), int(tokens[5]), int(tokens[6]), int(tokens[7]), queue_size)
+            ROUTING_TABLE[(dst_ip, int(tokens[3]))] = HopDetails(str(next_hop_ip), int(tokens[5]), int(tokens[6]), int(tokens[7]))
 
 
-def find_next_hop(header: Header) -> Union[HopDetails, None]:
-    if (header.dst_ip, header.dst_port) not in ROUTING_TABLE:
-        return None
-    return ROUTING_TABLE[(header.dst_ip, header.dst_port)]
-
-
-def perform_routing(port: int):
+def perform_routing(port: int, queue_size: int):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', port))
     sock.setblocking(False)
+    queue = QueueWithPriority(queue_size, sock)
 
     while True:
         while True:
             read_sockets, _, _ = select.select([sock], [], [], 0)
             if sock in read_sockets:
                 packet = sock.recv(BUF_SIZE)
-                next_hop = find_next_hop(Header.from_bytes(packet[:HEADER_SIZE]))
-                if next_hop is not None:
-                    next_hop.push_queue(packet, sock)
+                queue.push_queue(packet)
             else:
                 break
-        for next_hop in list(ROUTING_TABLE.values()):
-            next_hop.send_packets_if_ready(sock)
+        queue.send_packets_if_ready()
 
 
 if __name__ == "__main__":
@@ -154,5 +161,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.basicConfig(filename=args.log)
     signal.signal(signal.SIGINT, lambda x, y: sys.exit(1))
-    read_routing_table(args.filename, args.port, args.queue_size)
-    perform_routing(int(args.port))
+    read_routing_table(args.filename, args.port)
+    perform_routing(int(args.port), args.queue_size)
