@@ -13,6 +13,7 @@ from typing import Dict, Tuple, Union
 
 BUF_SIZE = 1024
 HEADER_SIZE = 18
+INNER_HEADER_SIZE = 9
 
 
 class Header:
@@ -68,25 +69,17 @@ class QueueWithPriority:
         self.delay_packet: Union[Tuple[datetime, bytes], None] = None
         self.sock = sock
 
-    def print_receive_queue(self):
-        for priority in self.queue_with_priority:
-            print("Priority:", priority)
-            for packet in self.queue_with_priority[priority]:
-                print(Header.from_bytes(packet[:HEADER_SIZE]))
-            print()
-
     def push_queue(self, packet: bytes):
         header = Header.from_bytes(packet[:HEADER_SIZE])
         next_hop = find_next_hop(header)
         if next_hop is None:
+            log_loss_event("no forwarding entry found", header)
             return
-        print("Packet pushed", datetime.now(), header, packet[HEADER_SIZE + 8:])
         if header.packet_type == 'E':
-            print("Forwarding end packet")
             self.sock.sendto(packet, (str(next_hop.next_hop_ip), next_hop.next_hop_port))
             return
         if len(self.queue_with_priority[header.priority]) >= self.queue_size:
-            print("Queue", header.priority, "full drop packet", header)
+            log_loss_event(f"priority queue {header.priority} was full", header)
             return
         self.queue_with_priority[header.priority].append(packet)
 
@@ -97,26 +90,31 @@ class QueueWithPriority:
             if datetime.now() <= self.delay_packet[0] + timedelta(milliseconds=next_hop.delay):
                 return
             if random.randint(1, 100) <= next_hop.loss_probability and delay_packet_header.packet_type != 'E':
-                print("Dropping packet", datetime.now(), delay_packet_header, self.delay_packet[1][HEADER_SIZE + 8:])
+                log_loss_event("loss event occurred", delay_packet_header)
                 self.delay_packet = None
                 return
-            print("Sending packet", datetime.now(), delay_packet_header, self.delay_packet[1][HEADER_SIZE + 8:])
             self.sock.sendto(self.delay_packet[1], (str(next_hop.next_hop_ip), next_hop.next_hop_port))
             self.delay_packet = None
         else:
             for priority in sorted(self.queue_with_priority.keys()):
                 if len(self.queue_with_priority[priority]) > 0:
                     self.delay_packet = (datetime.now(), self.queue_with_priority[priority].popleft())
-                    print("Delaying packet", self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]),
-                          self.delay_packet[1][HEADER_SIZE + 8:])
+                    # print("Delaying packet", self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]),
+                    #       self.delay_packet[1][HEADER_SIZE + 8:])
                     break
 
-    def print_delay_packet(self):
-        print(self.delay_packet[0], Header.from_bytes(self.delay_packet[1][:HEADER_SIZE]))
+
+def log_loss_event(reason: str, header: Header):
+    logging.info("Packet Loss Occured")
+    logging.info("Reason: %s", reason)
+    logging.info("Source: %s:%s", socket.gethostbyaddr(str(header.src_ip))[0], header.src_port)
+    logging.info("Destination: %s:%s", socket.gethostbyaddr(str(header.dst_ip))[0], header.dst_port)
+    logging.info("Time of Loss: %s", datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3])
+    logging.info("Priority: %d", header.priority)
+    logging.info("Payload size: %d\n", header.outer_length - INNER_HEADER_SIZE)
 
 
 ROUTING_TABLE: Dict[Tuple[ipaddress.IPv4Address, int], HopDetails] = dict()
-
 
 def read_routing_table(table_file: str, port: int):
     self_ip = socket.gethostbyname(socket.gethostname())
@@ -150,7 +148,6 @@ def perform_routing(port: int, queue_size: int):
                 break
         queue.send_packets_if_ready()
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='Emulator')
     parser.add_argument('-p', '--port', type=int, help='the port of the emulator', required=True)
@@ -159,7 +156,7 @@ if __name__ == "__main__":
     parser.add_argument('-l', '--log', type=str, help='the name of the log file', required=True)
 
     args = parser.parse_args()
-    logging.basicConfig(filename=args.log)
+    logging.basicConfig(filename=args.log, level=logging.INFO, format='%(message)s')
     signal.signal(signal.SIGINT, lambda x, y: sys.exit(1))
     read_routing_table(args.filename, args.port)
     perform_routing(int(args.port), args.queue_size)

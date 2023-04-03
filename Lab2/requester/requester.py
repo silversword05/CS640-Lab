@@ -86,7 +86,6 @@ class SenderDataExchange:
             return True
 
     def write_file(self):
-        print("Writing file", self.file_id)
         for i in range(1, self.end_seq_no):
             self.f_out.write(self.packet_chunks[i])
         self.packet_chunks.clear()

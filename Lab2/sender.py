@@ -79,7 +79,6 @@ class SenderWindow:
             if datetime.now() > self.window[seq_no].last_transmit_time + timedelta(milliseconds=self.timeout):
                 self.window[seq_no].retransmit_count += 1
                 time.sleep(1 / self.rate)
-                # print("Retransmission", Header.from_bytes(self.window[seq_no].packet[:HEADER_SIZE]))
                 self.sock.sendto(self.window[seq_no].packet, (self.emulator_ip, self.emulator_port))
                 self.window[seq_no].last_transmit_time = datetime.now()
                 self.retransmission_count += 1
@@ -91,11 +90,10 @@ class SenderWindow:
         time.sleep(1 / self.rate)
         self.sock.sendto(packet, (self.emulator_ip, self.emulator_port))
         self.seq_no += 1
-        self.retransmission_count += 1
+        self.first_transmission_count += 1
         return len(self.window) < self.max_window_size
 
     def ack_packet(self, header: Header):
-        # print("Acknowledgement packet", header)
         if header.seq_no in self.window:
             self.window[header.seq_no].retransmit_count = -1
 
@@ -107,7 +105,6 @@ class SenderWindow:
         packet_end: bytes = Header(self.priority, src_ip, self_port, dst_ip, requester_port, INNER_HEADER_SIZE, 'E', self.seq_no, 0).to_bytes()
         time.sleep(1 / self.rate)
         self.sock.sendto(packet_end, (self.emulator_ip, self.emulator_port))
-        # print("End packet send", Header.from_bytes(packet_end))
 
     def print_summary(self, self_addr: str, self_port: int):
         loss_rate = float(self.retransmission_count) * 100.0 / float(self.retransmission_count + self.first_transmission_count)
@@ -163,7 +160,6 @@ def receive_request(port: int, requester_port: int, rate: float, length: int, em
     packet = sock.recv(BUF_SIZE)
     header, data = Header.from_bytes(packet[:HEADER_SIZE]), packet[HEADER_SIZE:]
     assert header.packet_type == 'R'
-    print("Request packet", header)
     send_file(requester_port, port, rate, length, data.decode("utf-8"), header, emulator_name, emulator_port, priority, timeout, sock)
 
 
