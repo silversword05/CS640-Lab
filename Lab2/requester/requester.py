@@ -6,6 +6,7 @@ import socket
 import struct
 import sys
 from collections import defaultdict
+from datetime import datetime
 from typing import Union, BinaryIO, Tuple, Dict, List
 
 TRACKER_FILE = 'tracker.txt'
@@ -55,6 +56,8 @@ class SenderDataExchange:
         self.emulator_ip = socket.gethostbyname(emulator_name)
         self.emulator_port = emulator_port
         self.sock = sock
+        self.start = None
+        self.end = None
 
     def __lt__(self, other):
         return self.file_id < other.file_id
@@ -62,17 +65,24 @@ class SenderDataExchange:
     def register_packet(self, packet: bytes) -> bool:
         header, data = Header.from_bytes(packet[:HEADER_SIZE]), packet[HEADER_SIZE:]
         if header.packet_type == 'D':
+            if self.start is None:
+                self.start = datetime.now()
             if header.seq_no not in self.packet_chunks:
                 self.packet_chunks[header.seq_no] = data
             src_ip = socket.gethostbyname(socket.gethostname())
             packet_ack = Header(1, src_ip, self.self_port, str(header.src_ip), header.src_port, INNER_HEADER_SIZE, 'A', header.seq_no, 0).to_bytes()
             self.sock.sendto(packet_ack, (self.emulator_ip, self.emulator_port))
-            print("Acknowledged packet", header)
+            # print("Acknowledged packet", header)
             return False
         else:
             assert header.packet_type == 'E'
+            self.end = datetime.now()
             self.end_seq_no = header.seq_no
-            print("End packet", header)
+            print("End Packet")
+            print(f"recv time:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+            print(f"sender addr:  {header.src_ip}:{header.src_port}")
+            print(f"sequence:     {header.seq_no}")
+            print()
             return True
 
     def write_file(self):
@@ -80,6 +90,18 @@ class SenderDataExchange:
         for i in range(1, self.end_seq_no):
             self.f_out.write(self.packet_chunks[i])
         self.packet_chunks.clear()
+
+    def print_summary(self, sender_addr: ipaddress.IPv4Address, sender_from_port: int):
+        total_packets = len(self.packet_chunks)
+        total_bytes = sum([len(data) for data in self.packet_chunks.values()])
+        total_duration = int((self.end - self.start).total_seconds() * 1000)
+        print("Summary")
+        print(f"sender addr:             {sender_addr}:{sender_from_port}")
+        print(f"Total Data packets:      {total_packets}")
+        print(f"Total Data bytes:        {total_bytes}")
+        print(f"Average packets/second:  {round(total_packets * 1000 / total_duration) if total_duration != 0 else 0}")
+        print(f"Duration of the test:    {total_duration}  ms")
+        print()
 
 
 def read_tacker():
@@ -101,7 +123,9 @@ def receive_file(sock: socket.socket, data_exchange_list: Dict[Tuple[ipaddress.I
         header: Header = Header.from_bytes(packet[:HEADER_SIZE])
         if data_exchange_list[(header.src_ip, header.src_port)].register_packet(packet):
             completed_senders.append((header.dst_ip, header.dst_port))
-    print("Receiving file complete")
+    # print("Receiving files complete")
+    for sender_ip, sender_port in list(data_exchange_list.keys()):
+        data_exchange_list[(sender_ip, sender_port)].print_summary(sender_ip, sender_port)
     for sender_exchange in sorted(data_exchange_list.values()):
         sender_exchange.write_file()
 

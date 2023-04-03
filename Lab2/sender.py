@@ -79,7 +79,7 @@ class SenderWindow:
             if datetime.now() > self.window[seq_no].last_transmit_time + timedelta(milliseconds=self.timeout):
                 self.window[seq_no].retransmit_count += 1
                 time.sleep(1 / self.rate)
-                print("Retransmission", Header.from_bytes(self.window[seq_no].packet[:HEADER_SIZE]))
+                # print("Retransmission", Header.from_bytes(self.window[seq_no].packet[:HEADER_SIZE]))
                 self.sock.sendto(self.window[seq_no].packet, (self.emulator_ip, self.emulator_port))
                 self.window[seq_no].last_transmit_time = datetime.now()
                 self.retransmission_count += 1
@@ -95,7 +95,7 @@ class SenderWindow:
         return len(self.window) < self.max_window_size
 
     def ack_packet(self, header: Header):
-        print("Acknowledgement packet", header)
+        # print("Acknowledgement packet", header)
         if header.seq_no in self.window:
             self.window[header.seq_no].retransmit_count = -1
 
@@ -107,7 +107,14 @@ class SenderWindow:
         packet_end: bytes = Header(self.priority, src_ip, self_port, dst_ip, requester_port, INNER_HEADER_SIZE, 'E', self.seq_no, 0).to_bytes()
         time.sleep(1 / self.rate)
         self.sock.sendto(packet_end, (self.emulator_ip, self.emulator_port))
-        print("End packet send", Header.from_bytes(packet_end))
+        # print("End packet send", Header.from_bytes(packet_end))
+
+    def print_summary(self, self_addr: str, self_port: int):
+        loss_rate = float(self.retransmission_count) * 100.0 / float(self.retransmission_count + self.first_transmission_count)
+        print("Summary")
+        print(f"sender addr:             {self_addr}:{self_port}")
+        print(f"Average Loss Rate:       {loss_rate}")
+        print()
 
 
 def send_file(requester_port: int, self_port: int, rate: float, length: int, filename: str, request_packet_header: Header, emulator_name: str,
@@ -141,6 +148,7 @@ def send_file(requester_port: int, self_port: int, rate: float, length: int, fil
                 try_completing_window()
         try_completing_window()
         sender_window.send_end_packet(requester_port, str(request_packet_header.src_ip), self_port)
+        sender_window.print_summary(src_ip, self_port)
 
 
 def receive_request(port: int, requester_port: int, rate: float, length: int, emulator_name: str, emulator_port: int, priority: int, timeout: int):
