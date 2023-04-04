@@ -1,0 +1,10 @@
+### one requestor, two senders, two emulators
+### req - 4000 - 3000 - 3001 - 5000 - sender1
+### req - 4000 - 3000 - 3002 - 5001 - sender2
+royal-04 3000 royal-04 5000 royal-04 3001 0 0
+royal-04 3000 royal-04 4000 royal-04 4000 0 0
+royal-04 3000 royal-04 5001 royal-04 3002 0 0
+royal-04 3001 royal-04 5000 royal-04 5000 0 0
+royal-04 3001 royal-04 4000 royal-04 3000 0 0
+royal-04 3002 royal-04 5001 royal-04 5001 0 0
+royal-04 3002 royal-04 4000 royal-04 3000 500 0

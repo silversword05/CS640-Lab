@@ -93,6 +93,7 @@ class QueueWithPriority:
                 log_loss_event("loss event occurred", delay_packet_header)
                 self.delay_packet = None
                 return
+            print(f"Sending packet: {delay_packet_header}\n")
             self.sock.sendto(self.delay_packet[1], (str(next_hop.next_hop_ip), next_hop.next_hop_port))
             self.delay_packet = None
         else:

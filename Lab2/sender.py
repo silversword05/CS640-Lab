@@ -79,6 +79,7 @@ class SenderWindow:
             if datetime.now() > self.window[seq_no].last_transmit_time + timedelta(milliseconds=self.timeout):
                 self.window[seq_no].retransmit_count += 1
                 time.sleep(1 / self.rate)
+                print(f"Retransmitting packet: {Header.from_bytes(self.window[seq_no].packet[:HEADER_SIZE])}\n")
                 self.sock.sendto(self.window[seq_no].packet, (self.emulator_ip, self.emulator_port))
                 self.window[seq_no].last_transmit_time = datetime.now()
                 self.retransmission_count += 1
@@ -88,6 +89,7 @@ class SenderWindow:
         assert len(self.window) < self.max_window_size
         self.window[Header.from_bytes(packet[:HEADER_SIZE]).seq_no] = SenderWindow.PacketData(0, datetime.now(), packet)
         time.sleep(1 / self.rate)
+        print(f"First time trasmission: {Header.from_bytes(packet[:HEADER_SIZE])}\n")
         self.sock.sendto(packet, (self.emulator_ip, self.emulator_port))
         self.seq_no += 1
         self.first_transmission_count += 1
