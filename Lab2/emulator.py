@@ -106,7 +106,7 @@ class QueueWithPriority:
 
 
 def log_loss_event(reason: str, header: Header):
-    logging.info("Packet Loss Occured")
+    logging.info("Packet Loss Occurred")
     logging.info("Reason: %s", reason)
     logging.info("Source: %s:%s", socket.gethostbyaddr(str(header.src_ip))[0], header.src_port)
     logging.info("Destination: %s:%s", socket.gethostbyaddr(str(header.dst_ip))[0], header.dst_port)
@@ -116,6 +116,7 @@ def log_loss_event(reason: str, header: Header):
 
 
 ROUTING_TABLE: Dict[Tuple[ipaddress.IPv4Address, int], HopDetails] = dict()
+
 
 def read_routing_table(table_file: str, port: int):
     self_ip = socket.gethostbyname(socket.gethostname())
@@ -148,6 +149,7 @@ def perform_routing(port: int, queue_size: int):
             else:
                 break
         queue.send_packets_if_ready()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='Emulator')
