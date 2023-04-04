@@ -7,4 +7,4 @@ royal-04 3000 royal-04 5001 royal-04 3002 0 0
 royal-04 3001 royal-04 5000 royal-04 5000 0 0
 royal-04 3001 royal-04 4000 royal-04 3000 0 0
 royal-04 3002 royal-04 5001 royal-04 5001 0 0
-royal-04 3002 royal-04 4000 royal-04 3000 500 0
+royal-04 3002 royal-04 4000 royal-04 3000 0 0

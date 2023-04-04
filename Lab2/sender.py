@@ -126,7 +126,7 @@ def send_file(requester_port: int, self_port: int, rate: float, length: int, fil
         return
 
     def try_completing_window():
-        while not sender_window.retransmit_or_print_error():
+        while True:
             while True:
                 read_sockets, _, _ = select.select([sock], [], [], 0)
                 if sock not in read_sockets:
@@ -134,6 +134,8 @@ def send_file(requester_port: int, self_port: int, rate: float, length: int, fil
                 header_ack: Header = Header.from_bytes(sock.recv(BUF_SIZE)[:HEADER_SIZE])
                 assert header_ack.packet_type == 'A'
                 sender_window.ack_packet(header_ack)
+            if sender_window.retransmit_or_print_error():
+                break
         sender_window.clear_window()
 
     with open(filename, 'rb') as f:
