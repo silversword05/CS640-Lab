@@ -76,7 +76,6 @@ class RouteTrace:
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(('', self_port))
-        self.sock.setblocking(False)
         self.__register_self__()
 
     def __register_self__(self):
@@ -84,10 +83,6 @@ class RouteTrace:
         self.sock.sendto(header.to_bytes(), (str(self.src_ip), int(self.src_port)))
 
     def __get_packet__(self) -> Header:
-        while True:
-            read_sockets, _, _ = select.select([self.sock], [], [], 0)
-            if self.sock in read_sockets:
-                break
         packet = self.sock.recv(BUF_SIZE)
         header = Header.from_bytes(packet[:Header.header_size])
         assert header.packet_type == 'T'
