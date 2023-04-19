@@ -15,7 +15,7 @@ from typing import Union, List, Tuple, Dict, Set
 IP_PORT_SEPARATOR = ","
 BUF_SIZE = 1024
 PING_INTERVAL = timedelta(seconds=0.5)
-PING_SLEEP_MS = 10
+PING_SLEEP_MS = 1
 TTL_MAX = 50
 
 
@@ -100,6 +100,7 @@ class LinkStateIndividual:
             neighbour_ip, neighbour_port = str(token).split(IP_PORT_SEPARATOR)
             neighbour_ip = socket.gethostbyname(neighbour_ip)
             link_state_individual.neighbour_list.add((ipaddress.IPv4Address(neighbour_ip), int(neighbour_port)))
+        logging.info("Populated neighbours %s", str(link_state_individual))
         return link_state_individual
 
     def update_neighbours(self, line: str, new_seq_no: int):
@@ -112,6 +113,7 @@ class LinkStateIndividual:
             for token in tokens[1:]:
                 neighbour_ip, neighbour_port = str(token).split(IP_PORT_SEPARATOR)
                 self.neighbour_list.add((ipaddress.IPv4Address(neighbour_ip), int(neighbour_port)))
+            logging.info("Updated neighbours %s", str(self))
 
     def __add__(self, new_entries: List[Tuple[ipaddress.IPv4Address, int]]):
         add_success = False
@@ -119,8 +121,8 @@ class LinkStateIndividual:
             add_success = add_success or (new_entry not in self.neighbour_list)
             self.neighbour_list.add(new_entry)
         if add_success:
-            print("Added ", self.seq_no, f"{self.source_ip}:{self.source_port}", new_entries)
             self.seq_no += 1
+            logging.info("Added new entries %s %s %s", self.seq_no, f"{self.source_ip}:{self.source_port}", new_entries)
         return add_success
 
     def __sub__(self, new_entries: List[Tuple[ipaddress.IPv4Address, int]]):
@@ -129,8 +131,8 @@ class LinkStateIndividual:
             remove_success = remove_success or (new_entry in self.neighbour_list)
             self.neighbour_list.remove(new_entry)
         if remove_success:
-            print("Removed ", self.seq_no, f"{self.source_ip}:{self.source_port}", new_entries)
             self.seq_no += 1
+            logging.info("Removed new entries %s %s %s", self.seq_no, f"{self.source_ip}:{self.source_port}", new_entries)
         return remove_success
 
     def __str__(self):
@@ -153,6 +155,7 @@ class LinkGraph:
 
     def __add__(self, new_node: LinkStateIndividual):
         assert new_node not in self.link_state_map
+        logging.info("Added new link state %s", new_node)
         self.link_state_map[(new_node.source_ip, new_node.source_port)] = new_node
         return self
 
@@ -184,9 +187,11 @@ class LinkGraph:
                     node_costs[adj_node] = new_cost
                     heap.heappush(pq, (new_cost, adj_node))
 
+        logging.info("Ran dijkstra %s", parents_map)
         return parents_map, visited
 
     def build_forward_table(self):
+        logging.info("Building forwarding table")
         self.forwarding_table.clear()
         parents_map, visited = self.__dijkstra__()
 
@@ -220,20 +225,25 @@ class LinkGraph:
 
     def __print_topology__(self):
         print("Topology:")
+        logging.info("Topology: ")
         for node in self.link_state_map:
             print(self.link_state_map[node])
+            logging.info("%s", self.link_state_map[node])
 
     def __print_forwarding_table__(self):
         print("Forwarding Table:")
+        logging.info("Forwarding Table:")
         for dst_hop in self.forwarding_table:
             next_hop = self.forwarding_table[dst_hop]
             print(f"{str(dst_hop[0])}:{dst_hop[1]}", f"{str(next_hop[0])}:{next_hop[1]}")
+            logging.info("%s %s", f"{str(dst_hop[0])}:{dst_hop[1]}", f"{str(next_hop[0])}:{next_hop[1]}")
 
     def update_link_states(self, start_ip: ipaddress.IPv4Address, start_port: int, line: str, new_seq_no: int) -> int:
         if (start_ip, start_port) not in self.link_state_map:
             self.__add__(LinkStateIndividual(str(start_ip), start_port))
         old_seq_no = self.link_state_map[(start_ip, start_port)].seq_no
         self.link_state_map[(start_ip, start_port)].update_neighbours(line, new_seq_no)
+        logging.info("Link state update try %d %d", new_seq_no, old_seq_no)
         if new_seq_no > old_seq_no:
             self.build_forward_table()
         return old_seq_no
@@ -268,7 +278,7 @@ class LinkMaintenance:
         new_header = get_reverse_header(header)
         payload = self.link_graph.link_state_map[(start_ip, start_port)].get_payload_str()
         new_packet = new_header.to_bytes() + payload.encode("utf-8")
-        print("Sending source ping", new_header)
+        logging.info("Sending source ping %s", new_header)
         self.sock.sendto(new_packet, (str(new_header.dst_ip), new_header.dst_port))
 
     def __send_neighbour_ping__(self, packet: bytes):
@@ -282,12 +292,12 @@ class LinkMaintenance:
             new_header.dst_ip = node[0]
             new_header.dst_port = node[1]
             new_packet = new_header.to_bytes() + packet[Header.header_size:]
-            print("Sending neighbour ping", new_header)
+            logging.info("Sending neighbour ping %s", new_header)
             self.sock.sendto(new_packet, (str(node[0]), node[1]))
 
     def create_routes(self, packet: bytes):
         header = Header.from_bytes(packet[:Header.header_size])
-        print("Header Create route: ", header)
+        logging.info("Create route packet received: %s", header)
         assert header.packet_type == 'L'
         assert header.dst_ip == self.self_ip and header.dst_port == self.self_port
         assert not (header.src_ip == self.self_ip and header.src_port == self.self_port)
@@ -302,7 +312,7 @@ class LinkMaintenance:
         start_ip, start_port = ipaddress.IPv4Address(tokens[0]), int(tokens[1])
 
         old_seq_no: int = self.link_graph.update_link_states(start_ip, start_port, lines[1], header.seq_no)
-        print("Seq No", start_ip, start_port, old_seq_no, header.seq_no)
+        logging.info("Seq No in create route %s %d %d %d", start_ip, start_port, old_seq_no, header.seq_no)
         if old_seq_no > header.seq_no:
             self.__send_source_ping__(start_ip, start_port, header)
         elif old_seq_no < header.seq_no:
@@ -315,13 +325,14 @@ class LinkMaintenance:
         dead_nodes: List[Tuple[ipaddress.IPv4Address, int]] = list()
         for node in self.link_pings.keys():
             if datetime.now() > self.link_pings[node].ping_sent + PING_INTERVAL:
-                # print("Ping times", node, datetime.now(), self.link_pings[node])
+                logging.info("Ping times %s %s %s", node, datetime.now(), self.link_pings[node].ping_sent)
                 header = Header(self.self_ip, self.self_port, node[0], node[1], 'L', self_record.seq_no, 1, len(payload), False)
                 new_packet = header.to_bytes() + payload.encode("utf-8")
                 self.sock.sendto(new_packet, (str(node[0]), int(node[1])))
                 time.sleep(PING_SLEEP_MS / 1000)
                 self.link_pings[node].ping_sent = datetime.now()
-            if datetime.now() > self.link_pings[node].ping_received + 3 * PING_INTERVAL:
+            if datetime.now() > self.link_pings[node].ping_received + 6 * PING_INTERVAL:
+                logging.info("Ping miss %s %s %s", node, datetime.now(), self.link_pings[node].ping_received)
                 dead_nodes.append(node)
 
         for node in dead_nodes:
@@ -331,18 +342,20 @@ class LinkMaintenance:
 
     def drop_packet(self, packet: bytes):
         header = Header.from_bytes(packet[:Header.header_size])
-        print("Drop packets", header)
+        logging.info("Drop packets %s", header)
         assert header.ttl == 0
         if header.packet_type != 'T':
             return
 
         if (header.src_ip, header.src_port) in self.registered_clients:
-            new_inner_header: Header = get_reverse_header(header) # No outer header exists
+            logging.info("Dropping client packet %s", header)
+            new_inner_header: Header = get_reverse_header(header)  # No outer header exists
             new_inner_header.src_ip = self.self_ip
             new_inner_header.src_port = self.self_port
             new_packet: bytes = new_inner_header.to_bytes() + packet[Header.header_size + TunnelHeader.header_size:]
             self.sock.sendto(new_packet, (str(new_inner_header.dst_ip), int(new_inner_header.dst_port)))
         else:
+            logging.info("Dropping Normal packet %s", header)
             new_outer_header = get_reverse_header(header)
             new_outer_header.src_ip = self.self_ip
             new_outer_header.src_port = self.self_port
@@ -363,7 +376,7 @@ class LinkMaintenance:
 
         next_hop = self.link_graph.find_next_hop(header)
         if next_hop is None:
-            print("INFO: Dropping packet, next hop not found", header)
+            logging.fatal("INFO: Dropping packet, next hop not found %s", header)
             return
         header.ttl -= 1
         new_packet = header.to_bytes() + packet[Header.header_size:]
@@ -442,5 +455,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     Path("logs").mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(filename=f"logs/emu-{args.port}.log", level=logging.INFO, format='%(message)s')
+    logging.basicConfig(filename=f"logs/emu-{args.port}.log", level=logging.INFO, format='%(message)s', filemode='w')
     handle_packets(int(args.port), args.filename)
