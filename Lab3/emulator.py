@@ -20,17 +20,16 @@ TTL_MAX = 50
 
 
 class Header:
-    header_struct_format = '!IHIHcIHI?'
+    header_struct_format = '!IHIHcHI?'
     header_size = struct.calcsize(header_struct_format)
 
     def __init__(self, src_ip: Union[int, str, ipaddress.IPv4Address], src_port: int, dst_ip: Union[int, str, ipaddress.IPv4Address], dst_port: int,
-                 packet_type: str, seq_no: int, ttl: int, payload_length: int, wrapped: bool):
+                 packet_type: str, ttl: int, payload_length: int, wrapped: bool):
         self.src_ip = ipaddress.IPv4Address(src_ip)
         self.src_port = src_port
         self.dst_ip = ipaddress.IPv4Address(dst_ip)
         self.dst_port = dst_port
         self.packet_type = packet_type
-        self.seq_no = seq_no
         self.ttl = ttl
         self.payload_length = payload_length
         self.wrapped: bool = wrapped
@@ -39,17 +38,17 @@ class Header:
     def from_bytes(cls, header_data: bytes):
         assert len(header_data) == cls.header_size
         data_tuple = struct.unpack(cls.header_struct_format, header_data)
-        return cls(int(data_tuple[0]), int(data_tuple[1]), int(data_tuple[2]), int(data_tuple[3]), data_tuple[4].decode("utf-8"), int(data_tuple[5]),
-                   int(data_tuple[6]), int(data_tuple[7]), bool(data_tuple[8]))
+        return cls(int(data_tuple[0]), int(data_tuple[1]), int(data_tuple[2]), int(data_tuple[3]), data_tuple[4].decode("utf-8"),
+                   int(data_tuple[5]), int(data_tuple[6]), bool(data_tuple[7]))
 
     def to_bytes(self):
         assert self.src_ip != 0
         return struct.pack(self.header_struct_format, int(self.src_ip), self.src_port, int(self.dst_ip), self.dst_port,
-                           str(self.packet_type).encode(), self.seq_no, self.ttl, self.payload_length, self.wrapped)
+                           str(self.packet_type).encode(), self.ttl, self.payload_length, self.wrapped)
 
     def __str__(self):
         return (f"Header(src_ip={self.src_ip},src_port={self.src_port},dst_ip={self.dst_ip},dst_port={self.dst_port},"
-                f"packet_type={self.packet_type},seq_no={self.seq_no},ttl={self.ttl},payload-len={self.payload_length},wrapped={self.wrapped})")
+                f"packet_type={self.packet_type},ttl={self.ttl},payload-len={self.payload_length},wrapped={self.wrapped})")
 
 
 class TunnelHeader:
@@ -129,7 +128,7 @@ class LinkStateIndividual:
         remove_success = False
         for new_entry in new_entries:
             remove_success = remove_success or (new_entry in self.neighbour_list)
-            self.neighbour_list.remove(new_entry)
+            self.neighbour_list.discard(new_entry)
         if remove_success:
             self.seq_no += 1
             logging.info("Removed new entries %s %s %s", self.seq_no, f"{self.source_ip}:{self.source_port}", new_entries)
@@ -139,8 +138,7 @@ class LinkStateIndividual:
         return f"{self.seq_no} {self.source_ip}:{self.source_port} -> {','.join([str(x) + ':' + str(y) for x, y in self.neighbour_list])}"
 
     def get_payload_str(self):
-        res = f"{self.source_ip}{IP_PORT_SEPARATOR}{self.source_port}\n"
-        res += f"{self.source_ip}{IP_PORT_SEPARATOR}{self.source_port} " + " ".join(
+        res = f"{self.seq_no} {self.source_ip}{IP_PORT_SEPARATOR}{self.source_port} " + " ".join(
             [f"{elem[0]}{IP_PORT_SEPARATOR}{elem[1]}" for elem in self.neighbour_list])
         return res
 
@@ -238,6 +236,12 @@ class LinkGraph:
             print(f"{str(dst_hop[0])}:{dst_hop[1]}", f"{str(next_hop[0])}:{next_hop[1]}")
             logging.info("%s %s", f"{str(dst_hop[0])}:{dst_hop[1]}", f"{str(next_hop[0])}:{next_hop[1]}")
 
+    def get_total_payload(self):
+        res = ""
+        for node in self.link_state_map.keys():
+            res += self.link_state_map[node].get_payload_str() + "\n"
+        return res
+
     def update_link_states(self, start_ip: ipaddress.IPv4Address, start_port: int, line: str, new_seq_no: int) -> int:
         if (start_ip, start_port) not in self.link_state_map:
             self.__add__(LinkStateIndividual(str(start_ip), start_port))
@@ -274,26 +278,33 @@ class LinkMaintenance:
         self.self_ip = self_ip
         self.self_port = self_port
 
-    def __send_source_ping__(self, start_ip: ipaddress.IPv4Address, start_port: int, header: Header):
-        new_header = get_reverse_header(header)
-        payload = self.link_graph.link_state_map[(start_ip, start_port)].get_payload_str()
-        new_packet = new_header.to_bytes() + payload.encode("utf-8")
-        logging.info("Sending source ping %s", new_header)
-        self.sock.sendto(new_packet, (str(new_header.dst_ip), new_header.dst_port))
-
     def __send_neighbour_ping__(self, packet: bytes):
         header = Header.from_bytes(packet[:Header.header_size])
         assert header.packet_type == 'L'
         new_header = get_reverse_header(header)
+        payload = self.link_graph.get_total_payload()
 
         for node in self.link_pings.keys():
-            if node[0] == header.src_ip and node[1] == header.src_port:
-                continue
             new_header.dst_ip = node[0]
             new_header.dst_port = node[1]
-            new_packet = new_header.to_bytes() + packet[Header.header_size:]
+            new_header.payload_length = len(payload)
+            new_packet = new_header.to_bytes() + payload.encode("utf-8")
+
             logging.info("Sending neighbour ping %s", new_header)
             self.sock.sendto(new_packet, (str(node[0]), node[1]))
+
+    def __inspect_link_state_payload__(self, lines: List[str]):
+        need_update = False
+        for line in lines:
+            tokens = str(line).split(" ")
+            new_seq_no = int(tokens[0])
+            start_node_tokens = str(tokens[1]).split(IP_PORT_SEPARATOR)
+            start_ip, start_port = ipaddress.IPv4Address(start_node_tokens[0]), int(start_node_tokens[1])
+            update_line: str = " ".join(tokens[1:])
+            old_seq_no: int = self.link_graph.update_link_states(start_ip, start_port, update_line, new_seq_no)
+            logging.info("Seq No in create route %s %d %d %d", start_ip, start_port, old_seq_no, new_seq_no)
+            need_update = need_update or (old_seq_no != new_seq_no)
+        return need_update
 
     def create_routes(self, packet: bytes):
         header = Header.from_bytes(packet[:Header.header_size])
@@ -308,25 +319,18 @@ class LinkMaintenance:
 
         payload = packet[Header.header_size:]
         lines = payload.decode("utf-8").splitlines()
-        tokens = str(lines[0]).split(IP_PORT_SEPARATOR)
-        start_ip, start_port = ipaddress.IPv4Address(tokens[0]), int(tokens[1])
-
-        old_seq_no: int = self.link_graph.update_link_states(start_ip, start_port, lines[1], header.seq_no)
-        logging.info("Seq No in create route %s %d %d %d", start_ip, start_port, old_seq_no, header.seq_no)
-        if old_seq_no > header.seq_no:
-            self.__send_source_ping__(start_ip, start_port, header)
-        elif old_seq_no < header.seq_no:
+        if self.__inspect_link_state_payload__(lines):
+            logging.info("Sending neighbour updates %s", header)
             self.__send_neighbour_ping__(packet)
 
     def send_pings(self):
-        self_record = self.link_graph.link_state_map[(self.self_ip, self.self_port)]
-        payload = self_record.get_payload_str()
-
+        payload = self.link_graph.get_total_payload()
         dead_nodes: List[Tuple[ipaddress.IPv4Address, int]] = list()
+
         for node in self.link_pings.keys():
             if datetime.now() > self.link_pings[node].ping_sent + PING_INTERVAL:
                 logging.info("Ping times %s %s %s", node, datetime.now(), self.link_pings[node].ping_sent)
-                header = Header(self.self_ip, self.self_port, node[0], node[1], 'L', self_record.seq_no, 1, len(payload), False)
+                header = Header(self.self_ip, self.self_port, node[0], node[1], 'L', 1, len(payload), False)
                 new_packet = header.to_bytes() + payload.encode("utf-8")
                 self.sock.sendto(new_packet, (str(node[0]), int(node[1])))
                 time.sleep(PING_SLEEP_MS / 1000)
@@ -400,7 +404,7 @@ class LinkMaintenance:
 
         tunnel_header: TunnelHeader = TunnelHeader.from_bytes(packet[Header.header_size:Header.header_size + TunnelHeader.header_size])
         outer_header: Header = Header(self.self_ip, self.self_port, tunnel_header.dst_emulator_ip, tunnel_header.dst_emulator_port,
-                                      header.packet_type, 0, header.ttl, header.payload_length, True)
+                                      header.packet_type, header.ttl, header.payload_length, True)
         outer_packet: bytes = outer_header.to_bytes() + header.to_bytes() + packet[Header.header_size + TunnelHeader.header_size:]
         self.__find_next_hop_and_forward__(outer_packet)
 
@@ -457,3 +461,5 @@ if __name__ == "__main__":
     Path("logs").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=f"logs/emu-{args.port}.log", level=logging.INFO, format='%(message)s', filemode='w')
     handle_packets(int(args.port), args.filename)
+
+# python3 emulator.py -p 4000 -f topology2.txt

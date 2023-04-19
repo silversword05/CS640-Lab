@@ -10,17 +10,16 @@ TTL_MAX = 50
 
 
 class Header:
-    header_struct_format = '!IHIHcIHI?'
+    header_struct_format = '!IHIHcHI?'
     header_size = struct.calcsize(header_struct_format)
 
     def __init__(self, src_ip: Union[int, str, ipaddress.IPv4Address], src_port: int, dst_ip: Union[int, str, ipaddress.IPv4Address], dst_port: int,
-                 packet_type: str, seq_no: int, ttl: int, payload_length: int, wrapped: bool):
+                 packet_type: str, ttl: int, payload_length: int, wrapped: bool):
         self.src_ip = ipaddress.IPv4Address(src_ip)
         self.src_port = src_port
         self.dst_ip = ipaddress.IPv4Address(dst_ip)
         self.dst_port = dst_port
         self.packet_type = packet_type
-        self.seq_no = seq_no
         self.ttl = ttl
         self.payload_length = payload_length
         self.wrapped: bool = wrapped
@@ -29,17 +28,17 @@ class Header:
     def from_bytes(cls, header_data: bytes):
         assert len(header_data) == cls.header_size
         data_tuple = struct.unpack(cls.header_struct_format, header_data)
-        return cls(int(data_tuple[0]), int(data_tuple[1]), int(data_tuple[2]), int(data_tuple[3]), data_tuple[4].decode("utf-8"), int(data_tuple[5]),
-                   int(data_tuple[6]), int(data_tuple[7]), bool(data_tuple[8]))
+        return cls(int(data_tuple[0]), int(data_tuple[1]), int(data_tuple[2]), int(data_tuple[3]), data_tuple[4].decode("utf-8"),
+                   int(data_tuple[5]), int(data_tuple[6]), bool(data_tuple[7]))
 
     def to_bytes(self):
         assert self.src_ip != 0
         return struct.pack(self.header_struct_format, int(self.src_ip), self.src_port, int(self.dst_ip), self.dst_port,
-                           str(self.packet_type).encode(), self.seq_no, self.ttl, self.payload_length, self.wrapped)
+                           str(self.packet_type).encode(), self.ttl, self.payload_length, self.wrapped)
 
     def __str__(self):
         return (f"Header(src_ip={self.src_ip},src_port={self.src_port},dst_ip={self.dst_ip},dst_port={self.dst_port},"
-                f"packet_type={self.packet_type},seq_no={self.seq_no},ttl={self.ttl},payload-len={self.payload_length}),wrapped={self.wrapped}")
+                f"packet_type={self.packet_type},ttl={self.ttl},payload-len={self.payload_length}),wrapped={self.wrapped}")
 
 
 class TunnelHeader:
@@ -81,7 +80,7 @@ class RouteTrace:
         self.__register_self__()
 
     def __register_self__(self):
-        header: Header = Header(self.self_ip, self.self_port, self.src_ip, self.src_port, 'A', 0, 1, 0, False)
+        header: Header = Header(self.self_ip, self.self_port, self.src_ip, self.src_port, 'A', 1, 0, False)
         self.sock.sendto(header.to_bytes(), (str(self.src_ip), int(self.src_port)))
 
     def __get_packet__(self) -> Header:
@@ -97,7 +96,7 @@ class RouteTrace:
         return header
 
     def __send_trace_packet__(self, ttl: int):
-        header = Header(self.self_ip, self.self_port, self.dst_ip, self.dst_port, 'T', 0, ttl, 0, False)
+        header = Header(self.self_ip, self.self_port, self.dst_ip, self.dst_port, 'T', ttl, 0, False)
         tunnel_header = TunnelHeader(self.dst_ip, self.dst_port)
         if self.debug:
             print(f"INFO: Sent {header.src_ip}:{header.src_port} -> {header.dst_ip}:{header.dst_port} TTL={header.ttl}")
@@ -130,5 +129,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     route_trace = RouteTrace(int(args.route_trace_port), str(args.src_host), int(args.src_port), str(args.dst_host), int(args.dst_port),
                              bool(args.debug == 1))
-    print(bool(args.debug))
     route_trace.perform_trace()
+
+#  python3 trace.py -a 6000 -b 127.0.0.1 -c 1000 -d 127.0.0.1 -e 1000 -f 0
